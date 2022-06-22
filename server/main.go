@@ -49,6 +49,7 @@ func main() {
 	if err := syscall.Setrlimit(syscall.RLIMIT_NOFILE, &rlimit); err != nil {
 		panic(err)
 	}
+	log.Printf("now we could open %d sockets", rlimit.Max)
 	// Enable pprof hooks
 	go func() {
 		if err := http.ListenAndServe("localhost:6060", nil); err != nil {

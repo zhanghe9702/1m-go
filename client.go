@@ -7,6 +7,7 @@ import (
 	"log"
 	"net/url"
 	"os"
+	"syscall"
 	"time"
 
 	"github.com/gorilla/websocket"
@@ -31,6 +32,15 @@ func main() {
 		Path: "/",
 	}
 	log.Printf("Connecting to %s", u.String())
+	var rlimit syscall.Rlimit
+	if err := syscall.Getrlimit(syscall.RLIMIT_NOFILE, &rlimit); err != nil {
+		panic(err)
+	}
+	rlimit.Cur = rlimit.Max
+	if err := syscall.Setrlimit(syscall.RLIMIT_NOFILE, &rlimit); err != nil {
+		panic(err)
+	}
+	log.Printf("now we could open %d sockets", rlimit.Max)
 	var conns []*websocket.Conn
 	for i := 0; i < *connections; i++ {
 		c, _, err := websocket.DefaultDialer.Dial(u.String(), nil)
