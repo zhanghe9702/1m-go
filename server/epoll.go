@@ -1,16 +1,18 @@
 package main
 
 import (
+	"log"
 	"reflect"
 	"sync"
+	"syscall"
+	"net"
 
-	"github.com/gorilla/websocket"
 	"golang.org/x/sys/unix"
 )
 
 type epoll struct {
 	fd int
-	connections map[int]*websocket.Conn
+	connections map[int]net.Conn
 	lock sync.RWMutex
 }
 
@@ -22,17 +24,59 @@ func NewEpoll() (*epoll, error) {
 	return &epoll{
 		fd: fd,
 		lock: sync.RWMutex{},
-		connections: make(map[int]*websocket.Conn),
+		connections: make(map[int]net.Conn),
 	},nil
 }
 
-func getWebSocketFD(conn *websocket.Conn) int {
+func getWebSocketFD(conn net.Conn) int {
 	tcpConn := reflect.Indirect(reflect.ValueOf(conn)).FieldByName("conn")
 	fd := reflect.Indirect(tcpConn.FieldByName("fd")).FieldByName("pfd").FieldByName("Sysfd").Int()
 	return int(fd)
 }
 
-func (e *epoll) Add(conn *websocket.Conn) error {
+func (e *epoll) Add(conn net.Conn) error {
+	fd := getWebSocketFD(conn)
+	err := unix.EpollCtl(e.fd, syscall.EPOLL_CTL_ADD, fd, &unix.EpollEvent{Events: unix.POLLIN | unix.POLLHUP, Fd: int32(fd)})
+	if err != nil {
+		return err
+	}
+	e.lock.Lock()
+	defer e.lock.Unlock()
+	e.connections[fd] = conn
 
+	if len(e.connections)%100 == 0 {
+		log.Printf("Total number fo connections: %v", len(e.connections))
+	}
 	return nil
+}
+
+func (e *epoll) Remove(conn net.Conn) error {
+	fd := getWebSocketFD(conn)
+	err := unix.EpollCtl(e.fd, syscall.EPOLL_CTL_DEL, fd, nil) 
+	if err != nil {
+		return err
+	}
+	e.lock.Lock()
+	defer e.lock.Unlock()
+	delete(e.connections, fd)
+	if len(e.connections)%100 == 0 {
+		log.Printf("Total number fo connections: %v", len(e.connections))
+	}
+	return nil
+}
+
+func (e *epoll) Wait() ([]net.Conn, error ) {
+	events := make([]unix.EpollEvent, 100)
+	n, err := unix.EpollWait(e.fd, events, 100)
+	if err != nil {
+		return nil, err
+	}
+	e.lock.RLock()
+	defer e.lock.Unlock()
+	var connections []net.Conn
+	for i := 0; i < n; i++ {
+		conn := e.connections[int(events[i].Fd)]
+		connections = append(connections, conn)
+	}
+	return connections, nil
 }

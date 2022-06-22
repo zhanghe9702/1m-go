@@ -3,41 +3,23 @@ package main
 import (
 	"log"
 	"net/http"
-	"sync/atomic"
 	"syscall"
 	_ "net/http/pprof"
-	"github.com/gorilla/websocket"
+	// "github.com/gorilla/websocket"
+	"github.com/gobwas/ws"
+	"github.com/gobwas/ws/wsutil"
 )
-var count int64
-func ws(w http.ResponseWriter, r *http.Request) {
-	upgrader := websocket.Upgrader{
-		ReadBufferSize: 1024,
-		WriteBufferSize: 1024,
-	}
-	conn, err := upgrader.Upgrade(w, r, nil)
+var epoller *epoll
+func handle(w http.ResponseWriter, r *http.Request) {
+	conn, _,_, err := ws.UpgradeHTTP(r, w)
 	if err != nil {
 		return
 	}
-	n := atomic.AddInt64(&count, 1)
-	if n % 100 == 0 {
-		log.Printf("Total number of connections: %v", n)
-	}
-	defer func ()  {
-		n := atomic.AddInt64(&count, -1)
-		if n%100 == 0 {
-			log.Printf("Total number of connections: %v", n)
-		}
+	if err := epoller.Add(conn); err != nil {
+		log.Printf("Failed to add connection")
 		conn.Close()
-	}()
-	for {
-		_, msg, err := conn.ReadMessage()
-		if err != nil {
-			log.Printf("Failed to read message %v", err)
-			conn.Close()
-			return
-		}
-		log.Println(string(msg))
 	}
+
 }
 
 func main() {
@@ -56,6 +38,37 @@ func main() {
 			log.Fatalf("Pprof failed: %v", err)
 		}
 	}()
-	http.HandleFunc("/", ws)
+	var err error
+	epoller, err = NewEpoll()
+	if err != nil {
+		panic(err)
+	}
+	go Start()
+	http.HandleFunc("/", handle)
 	http.ListenAndServe(":8000", nil)
+}
+
+func Start() {
+	for {
+		connections, err := epoller.Wait()
+		if err != nil {
+			log.Printf("Failed to epoll wait %v", err)
+			continue
+		}
+		for _, conn := range connections {
+			if conn == nil {
+				break
+			}
+		        msg, _,  err := wsutil.ReadClientData(conn)
+			if err != nil {
+				if err := epoller.Remove(conn); err != nil {
+					log.Printf("Failed to remove %v", err)
+
+				}
+				conn.Close()
+			} else {
+				log.Printf("msg: %s", string(msg))
+			}
+		}
+	}
 }
