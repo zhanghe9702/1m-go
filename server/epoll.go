@@ -72,7 +72,7 @@ func (e *epoll) Wait() ([]net.Conn, error ) {
 		return nil, err
 	}
 	e.lock.RLock()
-	defer e.lock.Unlock()
+	defer e.lock.RUnlock()
 	var connections []net.Conn
 	for i := 0; i < n; i++ {
 		conn := e.connections[int(events[i].Fd)]

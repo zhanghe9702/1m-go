@@ -5,11 +5,12 @@ import (
 	"net/http"
 	"syscall"
 	_ "net/http/pprof"
-	// "github.com/gorilla/websocket"
 	"github.com/gobwas/ws"
 	"github.com/gobwas/ws/wsutil"
 )
+
 var epoller *epoll
+
 func handle(w http.ResponseWriter, r *http.Request) {
 	conn, _,_, err := ws.UpgradeHTTP(r, w)
 	if err != nil {
